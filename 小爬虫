@@ -1,0 +1,57 @@
+#-*- coding:utf-8 -*-
+#
+#爬取国税门户相关资源文件
+#
+#
+#使用 requests 和lxml 模块
+import requests
+from lxml import etree
+
+#定义请求的 url ，这里采用手动更换的方式爬取多个url 路径，并定义headers
+url = 'http://beijing.chinatax.gov.cn/bjswj/c104354/cs_li_2.shtml'
+headers =  {
+    'user-agent': 'Mozilla/5.0 (Windows NT 6.1; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/86.0.4240.198 Safari/537.36'
+ }
+
+#定义request 会话对象
+requestsSession = requests.Session()
+
+
+def getUrl():
+    #获取页面响应数据的text 格式
+    responseHtml = requestsSession.get(url=url, headers=headers, timeout=3).text
+    #使用etree 格式化文本
+    xpathObj = etree.HTML(responseHtml)
+    #通过xpath 获取要爬取的资源链接所在页面
+    dataUrl = xpathObj.xpath('//div[@class="xxgk_tzgg"]/ul//a/@href')
+    host = 'http://beijing.chinatax.gov.cn'
+    #遍历列表对象
+    for i in dataUrl:
+        print(i)
+        #重组 资源url
+        uurl = host + i
+        RRdata = requestsSession.get(url=uurl, headers=headers, timeout=3).text
+        xpathRR = etree.HTML(RRdata)
+        #获取资源路径
+        dataUrl = xpathRR.xpath('//div[@class="mobile-show"]//div[@class="xwzx_fujian"]/ul//a/@href')
+        # dataname = xpathRR.xpath('normalize-space(//div[@class="mobile-show"]//div[@class="xwzx_fujian"]/ul//a/text())')
+        #获取资源a 标签中的名称，因为默认下载的资源名称时英文字符串，
+        dataname = xpathRR.xpath('//div[@class="mobile-show"]//div[@class="xwzx_fujian"]//li//a/text()')
+        print(dataname)
+        print(dataUrl)
+        # 这一步是将删除将末尾/ 后面内容删除，为后面下载内容构造 url 做准备
+        hh =uurl[:uurl.rfind('/')]
+        #名称和资源路径在两个list 中，使用zip 函数可迭代的对象作为参数，将对象中对应的元素打包成一个个元组，然后返回由这些元组组成的列表。
+        for ii,dd in zip(dataUrl,dataname):
+            getuul = hh + '/' + ii
+            print(getuul)
+            #删除中文名称字符串左右两边的空格
+            cc = str(dd).strip()
+            r =  requestsSession.get(url=getuul, headers=headers, timeout=3)
+            fp = open(cc,'wb')
+            fp.write(r.content)
+            fp.close()
+            # wget.download(getuul, out=cc)
+
+if __name__ == '__main__':
+    getUrl()
