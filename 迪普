@@ -1,0 +1,136 @@
+#coding:utf-8
+import csv
+
+from ciscoconfparse import CiscoConfParse
+from ciscoconfparse.ccp_util import IPv4Obj
+
+#f = open("C:\\Users\\zy\\Desktop\\\\192.168.1.245.log", mode = "r",encoding='UTF-8')
+#content = f.read()
+#f.close()
+#print(content)
+#parse = CiscoConfParse(content)
+parse = CiscoConfParse("C:\\Users\\zy\\Desktop\\负载配置信息\\\\data\\dipu.conf")
+
+vs_objs = parse.find_objects(r"^slb\svirtual-service")
+vs_collection = {}
+for vs_obj in vs_objs:
+    vs_name = vs_obj.re_match(r"^slb\svirtual-service\s(\S+)", default="VS_NAME_PARSE_ERR")
+    vs_ip = vs_obj.re_match_iter_typed(r"^\sip\saddress\s(\S+)", result_type=IPv4Obj, default='0.0.0.255')
+    vs_port = vs_obj.re_match_iter_typed(r"^\sport\s(\S+)", result_type=int, default=-1)
+    vs_type = vs_obj.re_match_iter_typed(r"^\stype\s(\S+)", result_type=str, default='layer4')
+    vs_pool = vs_obj.re_match_iter_typed(r"^\spool\s(\S+)", result_type=str, default='UNKNOWN')
+    vs_backup_pool = vs_obj.re_match_iter_typed(r"^\sbackup-pool\s(\S+)", result_type=str, default='UNKNOWN')
+    vs_persist = vs_obj.re_match_iter_typed(r"^\spersistence\s(\S+\s\S+)", result_type=str, default='UNKNOWN')
+    vs_statue = vs_obj.re_match_iter_typed(r"^\sstatus\s(\S+)", result_type=str, default='UNKNOWN')
+    if vs_name != 'VS_NAME_PARSE_ERR':
+        vs_collection[vs_name] = {
+            "vs_ip": str(vs_ip.ip),
+            "vs_port": vs_port,
+            "vs_type": vs_type,
+            "default_pool": vs_pool,
+            "backup_pool": vs_backup_pool,
+            "persist": vs_persist,
+            "vs_statue": vs_statue,
+        }
+
+member_objs = parse.find_objects(r"^slb\smember")
+member_collection = {}
+for member_obj in member_objs:
+    member_name = member_obj.re_match(r"^slb\smember\s(\S+)", default="MEMBER_NAME_PARSE_ERR")
+    member_ip = member_obj.re_match_iter_typed(r"^\sip\saddress\s(\S+)", result_type=IPv4Obj, default='0.0.0.255')
+    member_port = member_obj.re_match_iter_typed(r"^\sport\s(\S+)", result_type=int, default=-1)
+    if member_name != 'MEMBER_NAME_PARSE_ERR':
+        member_collection[member_name] = {
+            "member_ip": str(member_ip.ip),
+            "member_port": member_port,
+        }
+
+pool_objs = parse.find_objects(r"^slb\spool")
+pool_collection = {}
+member_ip_tmp = []
+monitor_ip_tmp = []
+for pool_obj in pool_objs:
+    member_ip_tmp.clear()
+    monitor_ip_tmp.clear()
+    pool_name = pool_obj.re_match(r"^slb\spool\s(\S+)", default="POOL_NAME_PARSE_ERR")
+    pool_lbMode = pool_obj.re_match_iter_typed(r"^\sload-balancing-mode\s(\S+)", result_type=str, default='UNKNOWN')
+    member_list = pool_obj.re_search_children(r"^\smember")
+    if len(member_list) == 0:  # TODO: add log
+        member_list = "NO_MEMBER"
+        print("NO_MEMBER_WARNING: " + pool_name)
+    else:
+        for member in member_list:
+            member_ip_tmp.append(member.text.split(" ")[-1])
+    monitor_list = pool_obj.re_search_children(r"^\smonitor")
+    if len(monitor_list) == 0:  # TODO: add log
+        monitor_list = "NO_MONITOR"
+        print("NO_MONITOR_WARNING: " + pool_name)
+    else:
+        for monitor in monitor_list:
+            monitor_ip_tmp.append(monitor.re_match(r"^\s*monitor\s(\S+\s\S+)", default='UNKNOWN'))
+    if pool_name != 'POOL_NAME_PARSE_ERR':
+        pool_collection[pool_name] = {
+            "lb_mode": pool_lbMode,
+            "members": member_ip_tmp.copy(),
+            "monitor": monitor_ip_tmp.copy(),
+        }
+
+member_list_tmp = []
+for pool_name_itr, pool_prop_itr in pool_collection.items():
+    member_list_tmp.clear()
+    if len(pool_prop_itr["members"]) > 1:
+        for member_itr in pool_prop_itr["members"]:
+            if member_itr in member_collection:
+                member_list_tmp.append("%s:%s" % (member_collection[member_itr]["member_ip"],
+                                                  member_collection[member_itr]["member_port"]))
+            else:
+                member_list_tmp.append(member_itr)
+        pool_prop_itr["members"] = member_list_tmp.copy()
+
+csv_write_data = []
+for vs_name_itr, vs_prop_itr in vs_collection.items():
+    if vs_prop_itr["default_pool"] not in pool_collection:
+        csv_write_data.append({
+            "vs_name": vs_name_itr,
+            "ip": "%s:%s" % (vs_prop_itr["vs_ip"], vs_prop_itr["vs_port"]),
+            "type": vs_prop_itr["vs_type"],
+            "persist": vs_prop_itr["persist"],
+            "statue": vs_prop_itr["vs_statue"],
+            "default_pool": vs_prop_itr["default_pool"],
+            "backup_pool": vs_prop_itr["backup_pool"],
+            "lb_mode": "DEFAULT_VALUE",
+            "monitor": "DEFAULT_VALUE",
+            "members": "DEFAULT_VALUE",
+            "tag": "DEFAULT_POOL_NOT_FIND",
+        })
+    else:
+        csv_write_data.append({
+            "vs_name": vs_name_itr,
+            "ip": "%s:%s" % (vs_prop_itr["vs_ip"], vs_prop_itr["vs_port"]),
+            "type": vs_prop_itr["vs_type"],
+            "persist": vs_prop_itr["persist"],
+            "statue": vs_prop_itr["vs_statue"],
+            "default_pool": vs_prop_itr["default_pool"],
+            "backup_pool": vs_prop_itr["backup_pool"],
+            "lb_mode": pool_collection[vs_prop_itr["default_pool"]]["lb_mode"],
+            "monitor": pool_collection[vs_prop_itr["default_pool"]]["monitor"],
+            "members": pool_collection[vs_prop_itr["default_pool"]]["members"],
+            "tag": "OK",
+        })
+
+with open('C:\\Users\\zy\\Desktop\\负载配置信息\\192.168.1.245.csv', 'w', newline='') as csvfile:
+    fieldnames = ["VS_Name", "VS_IP", "Type", "Persist", "Default_Pool",
+                  "Health_Monitor", "Members", "Tag"]
+    writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+    writer.writeheader()
+    for vs_conf in csv_write_data:
+        writer.writerow({
+            "VS_Name": vs_conf["vs_name"],
+            "VS_IP": vs_conf["ip"],
+            "Type": vs_conf["type"],
+            "Persist": vs_conf["persist"],
+            "Default_Pool": vs_conf["default_pool"],
+            "Health_Monitor": vs_conf["monitor"],
+            "Members": vs_conf["members"],
+            "Tag": vs_conf["tag"],
+        })
