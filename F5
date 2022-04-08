@@ -6,7 +6,7 @@ import csv
 from f5.bigip import ManagementRoot
 
 # Connect to the BigIP
-session = ManagementRoot("192.168.1.245", "admin", "mima")
+session = ManagementRoot("192.168.1.245", "admin", "pwd")
 
 # CAPTURE LIST OF CLIENT SSL PROFILES
 client_ssls = session.tm.ltm.profile.client_ssls.get_collection()
@@ -29,6 +29,7 @@ vs_collection = []
 for virtual in virtuals:
     vs_conf = {}
     vs_conf["vs_partition"] = virtual.partition
+    vs_conf["vs_ipProtocol"] = virtual.ipProtocol
     if hasattr(virtual, 'subPath'):
         vs_conf["vs_subPath"] = virtual.subPath
     else:
@@ -36,6 +37,7 @@ for virtual in virtuals:
     vs_conf["vs_name"] = virtual.name
     if hasattr(virtual, 'description'):
         vs_conf["vs_description"] = virtual.description
+
     else:
         vs_conf["vs_description"] = "None"
     vs_conf["vs_destination"] = re.search('[^\/]+$', virtual.destination).group(0)
@@ -93,7 +95,7 @@ for virtual in virtuals:
     vs_collection.append(vs_conf)
 
 with open(os.path.join(os.path.dirname(__file__), "test_nat.csv"), 'w', newline='') as csvfile:
-    fieldnames = ["VS_Partition","VS_SubPath","VS_Name","VS_Description","VS_IP:Port","VS_Client_SSL","VS_Server_SSL","VS_iRules","VS_Persist","Pool","Pool_Members"]
+    fieldnames = ["VS_Partition","VS_SubPath","VS_Name","VS_Description","VS_IP:Port","VS_PROTOCOL","VS_Client_SSL","VS_Server_SSL","VS_iRules","VS_Persist","Pool","Pool_Members"]
     writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
     writer.writeheader()
     for vs_conf in vs_collection:
@@ -103,6 +105,7 @@ with open(os.path.join(os.path.dirname(__file__), "test_nat.csv"), 'w', newline=
             "VS_Name": vs_conf["vs_name"],
             "VS_Description": vs_conf["vs_description"],
             "VS_IP:Port": vs_conf["vs_destination"],
+            "VS_PROTOCOL": vs_conf["vs_ipProtocol"],
             "VS_Client_SSL": vs_conf["vs_client_ssl"],
             "VS_Server_SSL": vs_conf["vs_server_ssl"],
             "VS_iRules": vs_conf["vs_iRules"],
